@@ -48,7 +48,7 @@ func (r *FakeRequest) BytesSize() int {
 	return r.Bytes
 }
 
-func (r *FakeRequest) MergeSplit(_ context.Context, maxSize int, szt request.SizerType, r2 request.Request) ([]request.Request, error) {
+func (r *FakeRequest) MergeSplit(_ context.Context, maxSizePerSizer map[request.SizerType]int64, r2 request.Request) ([]request.Request, error) {
 	if r.MergeErr != nil {
 		return r.MergeErrResult, r.MergeErr
 	}
@@ -61,32 +61,50 @@ func (r *FakeRequest) MergeSplit(_ context.Context, maxSize int, szt request.Siz
 		fr2.mergeTo(r)
 	}
 
-	if maxSize == 0 {
+	if len(maxSizePerSizer) == 0 {
 		return []request.Request{r}, nil
+	}
+
+	var szt request.SizerType
+	var maxSize int64
+	if val, ok := maxSizePerSizer[request.SizerTypeItems]; ok {
+		szt = request.SizerTypeItems
+		maxSize = val
+	} else if val, ok := maxSizePerSizer[request.SizerTypeBytes]; ok {
+		szt = request.SizerTypeBytes
+		maxSize = val
 	}
 
 	var res []request.Request
 	switch szt {
 	case request.SizerTypeItems:
+		if maxSize <= 0 {
+			return []request.Request{r}, nil
+		}
 		for r.Items != 0 {
-			if r.Items <= maxSize {
+			if int64(r.Items) <= maxSize {
 				res = append(res, r)
 				break
 			}
-			res = append(res, &FakeRequest{Items: maxSize, Bytes: -1, Delay: r.Delay})
-			r.Items -= maxSize
+			res = append(res, &FakeRequest{Items: int(maxSize), Bytes: -1, Delay: r.Delay})
+			r.Items -= int(maxSize)
 			r.Bytes = -1
 		}
 	case request.SizerTypeBytes:
+		if maxSize <= 0 {
+			return []request.Request{r}, nil
+		}
 		for r.Bytes != 0 {
-			if r.Bytes <= maxSize {
+			if int64(r.Bytes) <= maxSize {
 				res = append(res, r)
 				break
 			}
-			res = append(res, &FakeRequest{Items: -1, Bytes: maxSize, Delay: r.Delay})
+			res = append(res, &FakeRequest{Items: -1, Bytes: int(maxSize), Delay: r.Delay})
 			r.Items = -1
-			r.Bytes -= maxSize
+			r.Bytes -= int(maxSize)
 		}
+	default:
+		return []request.Request{r}, nil
 	}
 
 	return res, nil

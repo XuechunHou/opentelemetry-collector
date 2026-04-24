@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 
-	"go.opentelemetry.io/collector/exporter/exporterhelper"
+	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/request"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/sizer"
 	"go.opentelemetry.io/collector/pdata/pprofile"
 )
@@ -17,15 +17,29 @@ import (
 //
 // Following the OTLP 1.7.0 upgrade, this is currently a noop.
 // See https://github.com/open-telemetry/opentelemetry-collector/issues/13106
-func (req *profilesRequest) MergeSplit(_ context.Context, maxSize int, szt exporterhelper.RequestSizerType, r2 Request) ([]Request, error) {
+func (req *profilesRequest) MergeSplit(_ context.Context, maxSizePerSizer map[request.SizerType]int64, r2 Request) ([]Request, error) {
+	var szt request.SizerType
+	var maxSize int64
+	if val, ok := maxSizePerSizer[request.SizerTypeItems]; ok {
+		szt = request.SizerTypeItems
+		maxSize = val
+	} else if val, ok := maxSizePerSizer[request.SizerTypeBytes]; ok {
+		szt = request.SizerTypeBytes
+		maxSize = val
+	}
+
 	var sz sizer.ProfilesSizer
 	switch szt {
-	case exporterhelper.RequestSizerTypeItems:
+	case request.SizerTypeItems:
 		sz = &sizer.ProfilesCountSizer{}
-	case exporterhelper.RequestSizerTypeBytes:
+	case request.SizerTypeBytes:
 		sz = &sizer.ProfilesBytesSizer{}
 	default:
-		return nil, errors.New("unknown sizer type")
+		// If no known sizer in map, and no limits, we can just return.
+		if len(maxSizePerSizer) == 0 {
+			return []Request{req}, nil
+		}
+		return nil, errors.New("unknown sizer type or no sizer specified")
 	}
 
 	if r2 != nil && r2.ItemsCount() > 0 {
@@ -43,7 +57,7 @@ func (req *profilesRequest) MergeSplit(_ context.Context, maxSize int, szt expor
 	if maxSize == 0 {
 		return []Request{req}, nil
 	}
-	return req.split(maxSize, sz)
+	return req.split(int(maxSize), sz)
 }
 
 func (req *profilesRequest) mergeTo(dst *profilesRequest, sz sizer.ProfilesSizer) error {

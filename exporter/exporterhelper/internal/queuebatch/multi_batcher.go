@@ -104,9 +104,11 @@ func (mb *multiBatcher) Shutdown(ctx context.Context) error {
 	defer mb.lock.Unlock()
 	for _, key := range mb.partitions.Keys() {
 		if pb, ok := mb.partitions.Peek(key); ok {
-			wg.Go(func() {
-				_ = pb.Shutdown(ctx)
-			})
+			wg.Add(1)
+			go func(p *partitionBatcher) {
+				defer wg.Done()
+				_ = p.Shutdown(ctx)
+			}(pb)
 		}
 	}
 	wg.Wait()

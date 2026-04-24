@@ -15,7 +15,17 @@ import (
 
 // MergeSplit splits and/or merges the provided traces request and the current request into one or more requests
 // conforming with the MaxSizeConfig.
-func (req *tracesRequest) MergeSplit(_ context.Context, maxSize int, szt request.SizerType, r2 request.Request) ([]request.Request, error) {
+func (req *tracesRequest) MergeSplit(_ context.Context, maxSizePerSizer map[request.SizerType]int64, r2 request.Request) ([]request.Request, error) {
+	var szt request.SizerType
+	var maxSize int64
+	if val, ok := maxSizePerSizer[request.SizerTypeItems]; ok {
+		szt = request.SizerTypeItems
+		maxSize = val
+	} else if val, ok := maxSizePerSizer[request.SizerTypeBytes]; ok {
+		szt = request.SizerTypeBytes
+		maxSize = val
+	}
+
 	var sz sizer.TracesSizer
 	switch szt {
 	case request.SizerTypeItems:
@@ -23,7 +33,11 @@ func (req *tracesRequest) MergeSplit(_ context.Context, maxSize int, szt request
 	case request.SizerTypeBytes:
 		sz = &sizer.TracesBytesSizer{}
 	default:
-		return nil, errors.New("unknown sizer type")
+		// If no known sizer in map, and no limits, we can just return.
+		if len(maxSizePerSizer) == 0 {
+			return []request.Request{req}, nil
+		}
+		return nil, errors.New("unknown sizer type or no sizer specified")
 	}
 
 	if r2 != nil {
@@ -38,7 +52,7 @@ func (req *tracesRequest) MergeSplit(_ context.Context, maxSize int, szt request
 	if maxSize == 0 {
 		return []request.Request{req}, nil
 	}
-	return req.split(maxSize, sz)
+	return req.split(int(maxSize), sz)
 }
 
 func (req *tracesRequest) mergeTo(dst *tracesRequest, sz sizer.TracesSizer) {
