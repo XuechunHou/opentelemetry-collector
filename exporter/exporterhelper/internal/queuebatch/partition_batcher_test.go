@@ -986,11 +986,3 @@ func TestPartitionBatcher_ShouldFlush(t *testing.T) {
 		})
 	}
 }
-
-
-
-
-
-
-
-

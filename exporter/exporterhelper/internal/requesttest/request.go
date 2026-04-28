@@ -93,7 +93,7 @@ func (r *FakeRequest) MergeSplit(_ context.Context, maxSizePerSizer map[request.
 		}
 
 		if chunkItems == 0 && chunkBytes == 0 {
-			return res, fmt.Errorf("limits too small to extract anything")
+			return res, errors.New("limits too small to extract anything")
 		}
 
 		if chunkItems >= r.Items && chunkBytes >= r.Bytes {
