@@ -65,46 +65,45 @@ func (r *FakeRequest) MergeSplit(_ context.Context, maxSizePerSizer map[request.
 		return []request.Request{r}, nil
 	}
 
-	var szt request.SizerType
-	var maxSize int64
-	if val, ok := maxSizePerSizer[request.SizerTypeItems]; ok {
-		szt = request.SizerTypeItems
-		maxSize = val
-	} else if val, ok := maxSizePerSizer[request.SizerTypeBytes]; ok {
-		szt = request.SizerTypeBytes
-		maxSize = val
-	}
-
 	var res []request.Request
-	switch szt {
-	case request.SizerTypeItems:
-		if maxSize <= 0 {
-			return []request.Request{r}, nil
-		}
-		for r.Items != 0 {
-			if int64(r.Items) <= maxSize {
-				res = append(res, r)
-				break
+	for r.Items > 0 || r.Bytes > 0 {
+		chunkItems := r.Items
+		chunkBytes := r.Bytes
+
+		if limit, ok := maxSizePerSizer[request.SizerTypeItems]; ok && limit > 0 {
+			if int64(chunkItems) > limit {
+				chunkItems = int(limit)
+				if r.Items > 0 {
+					chunkBytes = r.Bytes * chunkItems / r.Items
+				}
 			}
-			res = append(res, &FakeRequest{Items: int(maxSize), Bytes: -1, Delay: r.Delay})
-			r.Items -= int(maxSize)
-			r.Bytes = -1
 		}
-	case request.SizerTypeBytes:
-		if maxSize <= 0 {
-			return []request.Request{r}, nil
-		}
-		for r.Bytes != 0 {
-			if int64(r.Bytes) <= maxSize {
-				res = append(res, r)
-				break
+
+		if limit, ok := maxSizePerSizer[request.SizerTypeBytes]; ok && limit > 0 {
+			if int64(r.Bytes) > limit {
+				allowedItems := 0
+				if r.Bytes > 0 {
+					allowedItems = r.Items * int(limit) / r.Bytes
+				}
+				if allowedItems < chunkItems {
+					chunkItems = allowedItems
+					chunkBytes = int(limit)
+				}
 			}
-			res = append(res, &FakeRequest{Items: -1, Bytes: int(maxSize), Delay: r.Delay})
-			r.Items = -1
-			r.Bytes -= int(maxSize)
 		}
-	default:
-		return []request.Request{r}, nil
+
+		if chunkItems == 0 && chunkBytes == 0 {
+			return res, fmt.Errorf("limits too small to extract anything")
+		}
+
+		if chunkItems >= r.Items && chunkBytes >= r.Bytes {
+			res = append(res, r)
+			break
+		}
+
+		res = append(res, &FakeRequest{Items: chunkItems, Bytes: chunkBytes, Delay: r.Delay})
+		r.Items -= chunkItems
+		r.Bytes -= chunkBytes
 	}
 
 	return res, nil

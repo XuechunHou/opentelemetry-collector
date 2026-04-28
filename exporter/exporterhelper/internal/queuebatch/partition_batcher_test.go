@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"runtime"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,7 +19,6 @@ import (
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/request"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/requesttest"
-	"go.opentelemetry.io/collector/pdata/testdata"
 )
 
 type testContextKey string
@@ -830,11 +828,11 @@ func TestPartitionBatcher_MultiSizer_Split_TimeoutDisabled(t *testing.T) {
 		FlushTimeout: 0,
 		Sizers: map[request.SizerType]SizerLimit{
 			request.SizerTypeItems: {MinSize: 1, MaxSize: 4},
-			request.SizerTypeBytes: {MinSize: 1, MaxSize: 100000}, // large enough to not trigger by bytes
+			request.SizerTypeBytes: {MinSize: 1, MaxSize: 500},
 		},
 	}
 
-	sink := &customSink{}
+	sink := requesttest.NewSink()
 	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), nil)
 	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() {
@@ -843,46 +841,16 @@ func TestPartitionBatcher_MultiSizer_Split_TimeoutDisabled(t *testing.T) {
 
 	done := newFakeDone()
 	
-	// Generate logs with 10 log records.
-	logs := testdata.GenerateLogs(10)
-	req := newLogsRequest(logs)
-	
-	ba.Consume(context.Background(), req, done)
+	// Send request with 10 items and 1000 bytes.
+	// Should split by items limit (4) because it yields smaller chunk than bytes limit (5).
+	// 10 items split by 4 -> 4, 4, 2.
+	// Bytes scaled proportionally: 400, 400, 200.
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 10, Bytes: 1000}, done)
 
-	// We expect it to split by items (max 4).
-	// 10 logs split by 4 -> 4, 4, 2. So 3 requests!
 	assert.Eventually(t, func() bool {
-		return sink.RequestsCount() == 3 && sink.ItemsCount() == 10
+		return sink.RequestsCount() == 3 && sink.ItemsCount() == 10 && sink.BytesCount() == 1000
 	}, 1*time.Second, 10*time.Millisecond)
 
 	assert.EqualValues(t, 0, done.errors.Load())
 	assert.EqualValues(t, 1, done.success.Load()) // 1 original request sent
-}
-
-type customSink struct {
-	mu            sync.Mutex
-	requestsCount int
-	itemsCount    int
-	bytesCount    int
-}
-
-func (s *customSink) Export(_ context.Context, req request.Request) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.requestsCount++
-	s.itemsCount += req.ItemsCount()
-	s.bytesCount += req.BytesSize()
-	return nil
-}
-
-func (s *customSink) RequestsCount() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.requestsCount
-}
-
-func (s *customSink) ItemsCount() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.itemsCount
 }
