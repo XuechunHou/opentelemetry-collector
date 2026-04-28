@@ -31,6 +31,7 @@ func TestPartitionBatcher_NoSplit_MinThresholdZero_TimeoutDisabled(t *testing.T)
 		sizerType  request.SizerType
 		sizer      request.Sizer
 		maxWorkers int
+		sizers     map[request.SizerType]SizerLimit
 	}{
 		{
 			name:       "items/one_worker",
@@ -56,6 +57,26 @@ func TestPartitionBatcher_NoSplit_MinThresholdZero_TimeoutDisabled(t *testing.T)
 			sizer:      request.NewBytesSizer(),
 			maxWorkers: 3,
 		},
+		{
+			name:       "multi/items_and_bytes/one_worker",
+			sizerType:  request.SizerTypeItems,
+			sizer:      request.NewItemsSizer(),
+			maxWorkers: 1,
+			sizers: map[request.SizerType]SizerLimit{
+				request.SizerTypeItems: {MinSize: 0},
+				request.SizerTypeBytes: {MinSize: 0},
+			},
+		},
+		{
+			name:       "multi/items_and_bytes/three_workers",
+			sizerType:  request.SizerTypeItems,
+			sizer:      request.NewItemsSizer(),
+			maxWorkers: 3,
+			sizers: map[request.SizerType]SizerLimit{
+				request.SizerTypeItems: {MinSize: 0},
+				request.SizerTypeBytes: {MinSize: 0},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -63,6 +84,7 @@ func TestPartitionBatcher_NoSplit_MinThresholdZero_TimeoutDisabled(t *testing.T)
 				FlushTimeout: 0,
 				Sizer:        tt.sizerType,
 				MinSize:      0,
+				Sizers:       tt.sizers,
 			}
 
 			sink := requesttest.NewSink()
@@ -97,6 +119,7 @@ func TestPartitionBatcher_NoSplit_TimeoutDisabled(t *testing.T) {
 		sizerType  request.SizerType
 		sizer      request.Sizer
 		maxWorkers int
+		sizers     map[request.SizerType]SizerLimit
 	}{
 		{
 			name:       "items/one_worker",
@@ -122,6 +145,26 @@ func TestPartitionBatcher_NoSplit_TimeoutDisabled(t *testing.T) {
 			sizer:      request.NewBytesSizer(),
 			maxWorkers: 3,
 		},
+		{
+			name:       "multi/items_and_bytes/one_worker",
+			sizerType:  request.SizerTypeItems,
+			sizer:      request.NewItemsSizer(),
+			maxWorkers: 1,
+			sizers: map[request.SizerType]SizerLimit{
+				request.SizerTypeItems: {MinSize: 10},
+				request.SizerTypeBytes: {MinSize: 10},
+			},
+		},
+		{
+			name:       "multi/items_and_bytes/three_workers",
+			sizerType:  request.SizerTypeItems,
+			sizer:      request.NewItemsSizer(),
+			maxWorkers: 3,
+			sizers: map[request.SizerType]SizerLimit{
+				request.SizerTypeItems: {MinSize: 10},
+				request.SizerTypeBytes: {MinSize: 10},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -129,6 +172,7 @@ func TestPartitionBatcher_NoSplit_TimeoutDisabled(t *testing.T) {
 				FlushTimeout: 0,
 				Sizer:        tt.sizerType,
 				MinSize:      10,
+				Sizers:       tt.sizers,
 			}
 
 			sink := requesttest.NewSink()
