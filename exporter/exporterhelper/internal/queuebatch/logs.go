@@ -103,6 +103,7 @@ func (req *logsRequest) OnError(err error) request.Request {
 func (req *logsRequest) ItemsCount() int {
 	return req.ld.LogRecordCount()
 }
+
 func (req *logsRequest) size(szt request.SizerType, sizer sizer.LogsSizer) int {
 	if req.cachedSizes == nil {
 		req.cachedSizes = make(map[request.SizerType]int)
