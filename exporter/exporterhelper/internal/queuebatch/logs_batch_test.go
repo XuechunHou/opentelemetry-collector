@@ -457,3 +457,15 @@ func BenchmarkSplittingBasedOnByteSizeHugeLogs(b *testing.B) {
 		assert.Len(b, merged, 10)
 	}
 }
+
+func TestGetSortedSizerTypes(t *testing.T) {
+	m := map[request.SizerType]int{
+		request.SizerTypeBytes: 100,
+		request.SizerTypeItems: 10,
+	}
+	sorted := getSortedSizerTypes(m)
+	require.Len(t, sorted, 2)
+	// "bytes" < "items" alphabetically
+	assert.Equal(t, request.SizerTypeBytes, sorted[0])
+	assert.Equal(t, request.SizerTypeItems, sorted[1])
+}
