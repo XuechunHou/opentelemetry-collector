@@ -460,35 +460,65 @@ func TestPartitionBatcher_Shutdown(t *testing.T) {
 }
 
 func TestPartitionBatcher_MergeError(t *testing.T) {
-	cfg := BatchConfig{
-		FlushTimeout: 200 * time.Second,
-		Sizer:        request.SizerTypeItems,
-		MinSize:      5,
-		MaxSize:      7,
+	tests := []struct {
+		name        string
+		cfg         BatchConfig
+		req1        request.Request
+		req2        request.Request
+		expectItems int
+	}{
+		{
+			name: "legacy_single_sizer",
+			cfg: BatchConfig{
+				FlushTimeout: 200 * time.Second,
+				Sizer:        request.SizerTypeItems,
+				MinSize:      5,
+				MaxSize:      7,
+			},
+			req1:        &requesttest.FakeRequest{Items: 9, Bytes: 9},
+			req2:        &requesttest.FakeRequest{Items: 4, Bytes: 4},
+			expectItems: 7,
+		},
+		{
+			name: "multi_sizer",
+			cfg: BatchConfig{
+				FlushTimeout: 200 * time.Second,
+				Sizers: map[request.SizerType]SizerLimit{
+					request.SizerTypeItems: {MinSize: 5, MaxSize: 7},
+					request.SizerTypeBytes: {MinSize: 50, MaxSize: 70},
+				},
+			},
+			req1:        &requesttest.FakeRequest{Items: 9, Bytes: 90},
+			req2:        &requesttest.FakeRequest{Items: 4, Bytes: 40},
+			expectItems: 7,
+		},
 	}
 
-	sink := requesttest.NewSink()
-	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(2), sink.Export, zap.NewNop(), nil)
-	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
-	t.Cleanup(func() {
-		require.NoError(t, ba.Shutdown(context.Background()))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sink := requesttest.NewSink()
+			ba := newPartitionBatcher(tt.cfg, request.NewItemsSizer(), nil, newWorkerPool(2), sink.Export, zap.NewNop(), nil)
+			require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
+			t.Cleanup(func() {
+				require.NoError(t, ba.Shutdown(context.Background()))
+			})
 
-	done := newFakeDone()
-	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 9, Bytes: 9}, done)
-	assert.Eventually(t, func() bool {
-		return sink.RequestsCount() == 1 && sink.ItemsCount() == 7
-	}, 1*time.Second, 10*time.Millisecond)
+			done := newFakeDone()
+			ba.Consume(context.Background(), tt.req1, done)
+			assert.Eventually(t, func() bool {
+				return sink.RequestsCount() == 1 && sink.ItemsCount() == tt.expectItems
+			}, 1*time.Second, 10*time.Millisecond)
 
-	sink.SetExportErr(errors.New("transient error"))
-	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 4, Bytes: 4}, done)
-	assert.Eventually(t, func() bool {
-		return done.errors.Load() == 2
-	}, 1*time.Second, 10*time.Millisecond)
+			sink.SetExportErr(errors.New("transient error"))
+			ba.Consume(context.Background(), tt.req2, done)
+			assert.Eventually(t, func() bool {
+				return done.errors.Load() == 2
+			}, 1*time.Second, 10*time.Millisecond)
 
-	// Check that done callback is called for the right number of times.
-	assert.EqualValues(t, 2, done.errors.Load())
-	assert.EqualValues(t, 0, done.success.Load())
+			assert.EqualValues(t, 2, done.errors.Load())
+			assert.EqualValues(t, 0, done.success.Load())
+		})
+	}
 }
 
 func TestPartitionBatcher_PartialSuccessError(t *testing.T) {
