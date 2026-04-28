@@ -744,6 +744,7 @@ func TestPartitionBatcher_ContextMerging(t *testing.T) {
 	tests := []struct {
 		name         string
 		mergeCtxFunc func(ctx1, ctx2 context.Context) context.Context
+		sizers       map[request.SizerType]SizerLimit
 	}{
 		{
 			name: "merge_context_with_timestamp",
@@ -761,6 +762,16 @@ func TestPartitionBatcher_ContextMerging(t *testing.T) {
 			name:         "nil_merge_context",
 			mergeCtxFunc: nil,
 		},
+		{
+			name: "multi_sizer/merge_context_with_timestamp",
+			mergeCtxFunc: func(ctx1, _ context.Context) context.Context {
+				return context.WithValue(ctx1, timestampKey, 1234)
+			},
+			sizers: map[request.SizerType]SizerLimit{
+				request.SizerTypeItems: {MinSize: 10},
+				request.SizerTypeBytes: {MinSize: 10},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -768,6 +779,7 @@ func TestPartitionBatcher_ContextMerging(t *testing.T) {
 				FlushTimeout: 0,
 				Sizer:        request.SizerTypeItems,
 				MinSize:      10,
+				Sizers:       tt.sizers,
 			}
 			sink := requesttest.NewSink()
 			ba := newPartitionBatcher(cfg, request.NewItemsSizer(), tt.mergeCtxFunc, newWorkerPool(1), sink.Export, zap.NewNop(), nil)
