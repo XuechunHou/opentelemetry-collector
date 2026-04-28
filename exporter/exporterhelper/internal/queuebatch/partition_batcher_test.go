@@ -687,30 +687,57 @@ func (fd fakeDone) OnDone(err error) {
 }
 
 func TestShardBatcher_EmptyRequestList(t *testing.T) {
-	cfg := BatchConfig{
-		FlushTimeout: 0,
-		MinSize:      0,
+	tests := []struct {
+		name string
+		cfg  BatchConfig
+		req  request.Request
+	}{
+		{
+			name: "legacy_single_sizer",
+			cfg: BatchConfig{
+				FlushTimeout: 0,
+				MinSize:      0,
+			},
+			req: &requesttest.FakeRequest{
+				Items:    1,
+				MergeErr: errors.New("force empty list"),
+			},
+		},
+		{
+			name: "multi_sizer",
+			cfg: BatchConfig{
+				FlushTimeout: 0,
+				Sizers: map[request.SizerType]SizerLimit{
+					request.SizerTypeItems: {MinSize: 0},
+					request.SizerTypeBytes: {MinSize: 0},
+				},
+			},
+			req: &requesttest.FakeRequest{
+				Items:    1,
+				MergeErr: errors.New("force empty list"),
+			},
+		},
 	}
 
-	sink := requesttest.NewSink()
-	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), nil)
-	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
-	t.Cleanup(func() {
-		require.NoError(t, ba.Shutdown(context.Background()))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sink := requesttest.NewSink()
+			ba := newPartitionBatcher(tt.cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), nil)
+			require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
+			t.Cleanup(func() {
+				require.NoError(t, ba.Shutdown(context.Background()))
+			})
 
-	done := newFakeDone()
-	req := &requesttest.FakeRequest{
-		Items:    1,
-		MergeErr: errors.New("force empty list"),
+			done := newFakeDone()
+			ba.Consume(context.Background(), tt.req, done)
+
+			assert.Eventually(t, func() bool {
+				return done.errors.Load() == 1
+			}, time.Second, 10*time.Millisecond)
+			assert.Equal(t, int64(0), done.success.Load())
+			assert.Equal(t, 0, sink.RequestsCount())
+		})
 	}
-	ba.Consume(context.Background(), req, done)
-
-	assert.Eventually(t, func() bool {
-		return done.errors.Load() == 1
-	}, time.Second, 10*time.Millisecond)
-	assert.Equal(t, int64(0), done.success.Load())
-	assert.Equal(t, 0, sink.RequestsCount())
 }
 
 func TestPartitionBatcher_ContextMerging(t *testing.T) {
