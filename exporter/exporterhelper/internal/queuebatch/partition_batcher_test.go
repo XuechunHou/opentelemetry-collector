@@ -724,23 +724,35 @@ func TestPartitionBatcher_MultiSizer_NoSplit(t *testing.T) {
 	sink := requesttest.NewSink()
 	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), nil)
 	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
-	t.Cleanup(func() {
-		require.NoError(t, ba.Shutdown(context.Background()))
-	})
 
 	done := newFakeDone()
 
 	// Send request with 5 items, 50 bytes. Should NOT flush.
 	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 5, Bytes: 50}, done)
 	assert.Equal(t, 0, sink.RequestsCount())
-	assert.EqualValues(t, 0, done.success.Load())
 
-	// Send another request with 5 items, 50 bytes. Total 10 items, 100 bytes. Should flush!
-	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 5, Bytes: 50}, done)
+	// Send request with 5 items, 30 bytes. Total 10 items, 80 bytes. Should NOT flush (bytes not met).
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 5, Bytes: 30}, done)
+	assert.Equal(t, 0, sink.RequestsCount())
+
+	// Send request with 2 items, 30 bytes. Total 12 items, 110 bytes. Should flush!
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 2, Bytes: 30}, done)
 
 	assert.Eventually(t, func() bool {
-		return sink.RequestsCount() == 1 && (sink.ItemsCount() == 10 || sink.BytesCount() == 100)
+		return sink.RequestsCount() == 1 && (sink.ItemsCount() == 12 || sink.BytesCount() == 110)
 	}, 500*time.Millisecond, 10*time.Millisecond)
 
-	assert.EqualValues(t, 2, done.success.Load())
+	// Send request with 8 items, 90 bytes. Pending.
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 8, Bytes: 90}, done)
+	assert.Equal(t, 1, sink.RequestsCount())
+
+	require.NoError(t, ba.Shutdown(context.Background()))
+
+	// After shutdown the pending batch should be flushed.
+	assert.Equal(t, 2, sink.RequestsCount())
+	assert.True(t, sink.ItemsCount() == 20 || sink.BytesCount() == 200) // 12 + 8 = 20 items, 110 + 90 = 200 bytes
+
+	// Check that done callback is called for the right number of times.
+	assert.EqualValues(t, 0, done.errors.Load())
+	assert.EqualValues(t, 4, done.success.Load()) // 4 requests sent
 }
