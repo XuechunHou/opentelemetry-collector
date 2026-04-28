@@ -629,3 +629,85 @@ func TestPartitionBatcher_OnEmptyNotCalledWithActiveData(t *testing.T) {
 	// But data should have been flushed
 	assert.GreaterOrEqual(t, sink.RequestsCount(), 1)
 }
+
+func TestPartitionBatcher_ShouldFlush(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      BatchConfig
+		req      request.Request
+		expected bool
+	}{
+		{
+			name: "legacy_fallback_false",
+			cfg: BatchConfig{
+				Sizer:   request.SizerTypeItems,
+				MinSize: 10,
+			},
+			req:      &requesttest.FakeRequest{Items: 5},
+			expected: false,
+		},
+		{
+			name: "legacy_fallback_true",
+			cfg: BatchConfig{
+				Sizer:   request.SizerTypeItems,
+				MinSize: 10,
+			},
+			req:      &requesttest.FakeRequest{Items: 10},
+			expected: true,
+		},
+		{
+			name: "multi_sizer_and_all_meet",
+			cfg: BatchConfig{
+				Sizers: map[request.SizerType]SizerLimit{
+					request.SizerTypeItems: {MinSize: 10},
+					request.SizerTypeBytes: {MinSize: 100},
+				},
+			},
+			req:      &requesttest.FakeRequest{Items: 10, Bytes: 100},
+			expected: true,
+		},
+		{
+			name: "multi_sizer_and_only_items_meet",
+			cfg: BatchConfig{
+				Sizers: map[request.SizerType]SizerLimit{
+					request.SizerTypeItems: {MinSize: 10},
+					request.SizerTypeBytes: {MinSize: 100},
+				},
+			},
+			req:      &requesttest.FakeRequest{Items: 10, Bytes: 50},
+			expected: false,
+		},
+		{
+			name: "multi_sizer_and_only_bytes_meet",
+			cfg: BatchConfig{
+				Sizers: map[request.SizerType]SizerLimit{
+					request.SizerTypeItems: {MinSize: 10},
+					request.SizerTypeBytes: {MinSize: 100},
+				},
+			},
+			req:      &requesttest.FakeRequest{Items: 5, Bytes: 100},
+			expected: false,
+		},
+		{
+			name: "multi_sizer_and_none_meet",
+			cfg: BatchConfig{
+				Sizers: map[request.SizerType]SizerLimit{
+					request.SizerTypeItems: {MinSize: 10},
+					request.SizerTypeBytes: {MinSize: 100},
+				},
+			},
+			req:      &requesttest.FakeRequest{Items: 5, Bytes: 50},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			qb := &partitionBatcher{cfg: tt.cfg}
+			if len(tt.cfg.Sizers) == 0 {
+				qb.sizer = request.NewSizer(tt.cfg.Sizer)
+			}
+			assert.Equal(t, tt.expected, qb.shouldFlush(tt.req))
+		})
+	}
+}
