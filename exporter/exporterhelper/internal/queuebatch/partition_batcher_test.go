@@ -756,3 +756,95 @@ func TestPartitionBatcher_MultiSizer_NoSplit(t *testing.T) {
 	assert.EqualValues(t, 0, done.errors.Load())
 	assert.EqualValues(t, 4, done.success.Load()) // 4 requests sent
 }
+
+func TestPartitionBatcher_MultiSizer_NoSplit_MinThresholdZero_TimeoutDisabled(t *testing.T) {
+	cfg := BatchConfig{
+		FlushTimeout: 0,
+		Sizers: map[request.SizerType]SizerLimit{
+			request.SizerTypeItems: {MinSize: 0},
+			request.SizerTypeBytes: {MinSize: 0},
+		},
+	}
+
+	sink := requesttest.NewSink()
+	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), nil)
+	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
+	t.Cleanup(func() {
+		require.NoError(t, ba.Shutdown(context.Background()))
+	})
+
+	done := newFakeDone()
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 8, Bytes: 8}, done)
+	sink.SetExportErr(errors.New("transient error"))
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 8, Bytes: 8}, done)
+	<-time.After(10 * time.Millisecond)
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 17, Bytes: 17}, done)
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 13, Bytes: 13}, done)
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 35, Bytes: 35}, done)
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 2, Bytes: 2}, done)
+	assert.Eventually(t, func() bool {
+		return sink.RequestsCount() == 5 && (sink.ItemsCount() == 75 || sink.BytesCount() == 75)
+	}, 1*time.Second, 10*time.Millisecond)
+
+	assert.EqualValues(t, 1, done.errors.Load())
+	assert.EqualValues(t, 5, done.success.Load())
+}
+
+func TestPartitionBatcher_MultiSizer_NoSplit_WithTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows")
+	}
+
+	cfg := BatchConfig{
+		FlushTimeout: 50 * time.Millisecond,
+		Sizers: map[request.SizerType]SizerLimit{
+			request.SizerTypeItems: {MinSize: 100},
+			request.SizerTypeBytes: {MinSize: 1000},
+		},
+	}
+
+	sink := requesttest.NewSink()
+	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), nil)
+	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
+	t.Cleanup(func() {
+		require.NoError(t, ba.Shutdown(context.Background()))
+	})
+
+	done := newFakeDone()
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 8, Bytes: 8}, done)
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 17, Bytes: 17}, done)
+
+	// Wait for timeout
+	assert.Eventually(t, func() bool {
+		return sink.RequestsCount() == 1 && (sink.ItemsCount() == 25 || sink.BytesCount() == 25)
+	}, 1*time.Second, 10*time.Millisecond)
+
+	assert.EqualValues(t, 0, done.errors.Load())
+	assert.EqualValues(t, 2, done.success.Load())
+}
+
+func TestPartitionBatcher_MultiSizer_Split_TimeoutDisabled(t *testing.T) {
+	cfg := BatchConfig{
+		FlushTimeout: 0,
+		Sizers: map[request.SizerType]SizerLimit{
+			request.SizerTypeItems: {MinSize: 100, MaxSize: 100},
+		},
+	}
+
+	sink := requesttest.NewSink()
+	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), nil)
+	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
+	t.Cleanup(func() {
+		require.NoError(t, ba.Shutdown(context.Background()))
+	})
+
+	done := newFakeDone()
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 900, Bytes: 900}, done)
+
+	assert.Eventually(t, func() bool {
+		return sink.RequestsCount() == 9 && (sink.ItemsCount() == 900 || sink.BytesCount() == 900)
+	}, 1*time.Second, 10*time.Millisecond)
+
+	assert.EqualValues(t, 0, done.errors.Load())
+	assert.EqualValues(t, 1, done.success.Load())
+}
