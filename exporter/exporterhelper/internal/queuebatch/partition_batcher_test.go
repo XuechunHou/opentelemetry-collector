@@ -711,3 +711,36 @@ func TestPartitionBatcher_ShouldFlush(t *testing.T) {
 		})
 	}
 }
+
+func TestPartitionBatcher_MultiSizer_NoSplit(t *testing.T) {
+	cfg := BatchConfig{
+		FlushTimeout: 0,
+		Sizers: map[request.SizerType]SizerLimit{
+			request.SizerTypeItems: {MinSize: 10},
+			request.SizerTypeBytes: {MinSize: 100},
+		},
+	}
+
+	sink := requesttest.NewSink()
+	ba := newPartitionBatcher(cfg, request.NewItemsSizer(), nil, newWorkerPool(1), sink.Export, zap.NewNop(), nil)
+	require.NoError(t, ba.Start(context.Background(), componenttest.NewNopHost()))
+	t.Cleanup(func() {
+		require.NoError(t, ba.Shutdown(context.Background()))
+	})
+
+	done := newFakeDone()
+
+	// Send request with 5 items, 50 bytes. Should NOT flush.
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 5, Bytes: 50}, done)
+	assert.Equal(t, 0, sink.RequestsCount())
+	assert.EqualValues(t, 0, done.success.Load())
+
+	// Send another request with 5 items, 50 bytes. Total 10 items, 100 bytes. Should flush!
+	ba.Consume(context.Background(), &requesttest.FakeRequest{Items: 5, Bytes: 50}, done)
+
+	assert.Eventually(t, func() bool {
+		return sink.RequestsCount() == 1 && (sink.ItemsCount() == 10 || sink.BytesCount() == 100)
+	}, 500*time.Millisecond, 10*time.Millisecond)
+
+	assert.EqualValues(t, 2, done.success.Load())
+}
