@@ -59,8 +59,6 @@ func TestPartitionBatcher_NoSplit_MinThresholdZero_TimeoutDisabled(t *testing.T)
 		},
 		{
 			name:       "multi/items_and_bytes/one_worker",
-			sizerType:  request.SizerTypeItems,
-			sizer:      request.NewItemsSizer(),
 			maxWorkers: 1,
 			sizers: map[request.SizerType]SizerLimit{
 				request.SizerTypeItems: {MinSize: 0},
@@ -69,8 +67,6 @@ func TestPartitionBatcher_NoSplit_MinThresholdZero_TimeoutDisabled(t *testing.T)
 		},
 		{
 			name:       "multi/items_and_bytes/three_workers",
-			sizerType:  request.SizerTypeItems,
-			sizer:      request.NewItemsSizer(),
 			maxWorkers: 3,
 			sizers: map[request.SizerType]SizerLimit{
 				request.SizerTypeItems: {MinSize: 0},
@@ -147,8 +143,6 @@ func TestPartitionBatcher_NoSplit_TimeoutDisabled(t *testing.T) {
 		},
 		{
 			name:       "multi/items_and_bytes/one_worker",
-			sizerType:  request.SizerTypeItems,
-			sizer:      request.NewItemsSizer(),
 			maxWorkers: 1,
 			sizers: map[request.SizerType]SizerLimit{
 				request.SizerTypeItems: {MinSize: 10},
@@ -157,8 +151,6 @@ func TestPartitionBatcher_NoSplit_TimeoutDisabled(t *testing.T) {
 		},
 		{
 			name:       "multi/items_and_bytes/three_workers",
-			sizerType:  request.SizerTypeItems,
-			sizer:      request.NewItemsSizer(),
 			maxWorkers: 3,
 			sizers: map[request.SizerType]SizerLimit{
 				request.SizerTypeItems: {MinSize: 10},
