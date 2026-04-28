@@ -80,11 +80,11 @@ func (qb *partitionBatcher) shouldFlush(req request.Request) bool {
 	if len(qb.cfg.Sizers) > 0 {
 		for szt, limit := range qb.cfg.Sizers {
 			szr := request.NewSizer(szt)
-			if szr.Sizeof(req) >= limit.MinSize {
-				return true
+			if szr.Sizeof(req) < limit.MinSize {
+				return false
 			}
 		}
-		return false
+		return true
 	}
 	return qb.sizer.Sizeof(req) >= qb.cfg.MinSize
 }
