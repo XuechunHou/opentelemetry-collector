@@ -55,6 +55,10 @@ func (cfg *Config) Unmarshal(conf *confmap.Conf) error {
 	if conf.IsSet("batch::min_size") || conf.IsSet("batch::max_size") || conf.IsSet("batch::sizer") {
 		return errors.New("`batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead")
 	}
+
+	if cfg.Batch.HasValue() && len(cfg.Batch.Get().Sizers) > 1 {
+		return errors.New("`sizers` supports only one entry at this moment")
+	}
 	return nil
 }
 
@@ -148,7 +152,9 @@ func (cfg *BatchConfig) Validate() error {
 		return errors.New("`batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead")
 	}
 
-
+	if len(cfg.Sizers) > 1 {
+		return errors.New("`sizers` supports only one entry at this moment")
+	}
 
 	for szt, limit := range cfg.Sizers {
 		if szt != request.SizerTypeItems && szt != request.SizerTypeBytes {

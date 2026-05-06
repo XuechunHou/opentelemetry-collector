@@ -20,15 +20,15 @@ import (
 func TestMultiBatcher_NoTimeout(t *testing.T) {
 	cfg := BatchConfig{
 		FlushTimeout: 0,
-		Sizers: map[request.SizerType]SizerLimit{
-			request.SizerTypeItems: {MinSize: 10},
-		},
+		Sizer:        request.SizerTypeItems,
+		MinSize:      10,
 	}
 	sink := requesttest.NewSink()
 
 	type partitionKey struct{}
 
 	ba, err := newMultiBatcher(cfg,
+		request.NewItemsSizer(),
 		newWorkerPool(1),
 		NewPartitioner(func(ctx context.Context, _ request.Request) string {
 			return ctx.Value(partitionKey{}).(string)
@@ -77,15 +77,15 @@ func TestMultiBatcher_NoTimeout(t *testing.T) {
 func TestMultiBatcher_Timeout(t *testing.T) {
 	cfg := BatchConfig{
 		FlushTimeout: 100 * time.Millisecond,
-		Sizers: map[request.SizerType]SizerLimit{
-			request.SizerTypeItems: {MinSize: 100},
-		},
+		Sizer:        request.SizerTypeItems,
+		MinSize:      100,
 	}
 	sink := requesttest.NewSink()
 
 	type partitionKey struct{}
 
 	ba, err := newMultiBatcher(cfg,
+		request.NewItemsSizer(),
 		newWorkerPool(1),
 		NewPartitioner(func(ctx context.Context, _ request.Request) string {
 			return ctx.Value(partitionKey{}).(string)
@@ -126,15 +126,15 @@ func TestMultiBatcher_PartitionRemovedAfterIdleTimeout(t *testing.T) {
 	// Use a short FlushTimeout so the idle threshold (partitionIdleCycles*FlushTimeout) is reached quickly.
 	cfg := BatchConfig{
 		FlushTimeout: 10 * time.Millisecond,
-		Sizers: map[request.SizerType]SizerLimit{
-			request.SizerTypeItems: {MinSize: 100},
-		},
+		Sizer:        request.SizerTypeItems,
+		MinSize:      100, // High min size to prevent immediate flush
 	}
 	sink := requesttest.NewSink()
 
 	type partitionKey struct{}
 
 	ba, err := newMultiBatcher(cfg,
+		request.NewItemsSizer(),
 		newWorkerPool(1),
 		NewPartitioner(func(ctx context.Context, _ request.Request) string {
 			return ctx.Value(partitionKey{}).(string)
