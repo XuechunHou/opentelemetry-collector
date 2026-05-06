@@ -45,7 +45,6 @@ func TestConfig_Validate(t *testing.T) {
 
 	cfg = newTestConfig()
 	cfg.Batch.Get().Sizers = map[request.SizerType]SizerLimit{}
-	cfg.Batch.Get().Sizer = request.SizerType{}
 	require.NoError(t, xconfmap.Validate(cfg))
 
 	cfg = newTestConfig()
@@ -165,8 +164,6 @@ func newTestBatchConfig() BatchConfig {
 		},
 	}
 }
-
-
 
 func TestUnmarshal(t *testing.T) {
 	newBaseCfg := func() configoptional.Optional[Config] {
@@ -297,4 +294,3 @@ func TestUnmarshal(t *testing.T) {
 		})
 	}
 }
-

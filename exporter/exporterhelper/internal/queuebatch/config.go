@@ -152,8 +152,6 @@ func (cfg *BatchConfig) Validate() error {
 		return errors.New("`batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead")
 	}
 
-
-
 	if len(cfg.Sizers) > 1 {
 		return errors.New("`sizers` supports only one entry at this moment")
 	}
