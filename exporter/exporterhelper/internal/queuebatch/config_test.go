@@ -19,41 +19,41 @@ import (
 )
 
 func TestConfig_Validate(t *testing.T) {
-	cfg := newTestConfigWithSizers()
+	cfg := newTestConfig()
 	require.NoError(t, xconfmap.Validate(cfg))
 
 	cfg.NumConsumers = 0
 	require.EqualError(t, xconfmap.Validate(cfg), "`num_consumers` must be positive")
 
-	cfg = newTestConfigWithSizers()
+	cfg = newTestConfig()
 	cfg.QueueSize = 0
 	require.EqualError(t, xconfmap.Validate(cfg), "`queue_size` must be positive")
 
-	cfg = newTestConfigWithSizers()
+	cfg = newTestConfig()
 	cfg.QueueSize = 0
 	require.EqualError(t, xconfmap.Validate(cfg), "`queue_size` must be positive")
 
 	storageID := component.MustNewID("test")
-	cfg = newTestConfigWithSizers()
+	cfg = newTestConfig()
 	cfg.WaitForResult = true
 	cfg.StorageID = &storageID
 	require.EqualError(t, xconfmap.Validate(cfg), "`wait_for_result` is not supported with a persistent queue configured with `storage`")
 
-	cfg = newTestConfigWithSizers()
+	cfg = newTestConfig()
 	cfg.QueueSize = cfg.Batch.Get().Sizers[request.SizerTypeItems].MinSize - 1
 	require.EqualError(t, xconfmap.Validate(cfg), "for sizer items, `min_size` (2048) must be less than or equal to `queue_size` (2047)")
 
-	cfg = newTestConfigWithSizers()
+	cfg = newTestConfig()
 	cfg.Batch.Get().Sizers = map[request.SizerType]SizerLimit{}
 	cfg.Batch.Get().Sizer = request.SizerType{}
 	require.EqualError(t, xconfmap.Validate(cfg), "batch: `sizers` cannot be empty; leave it unset to use default batch settings, or configure at least one sizer limit")
 
-	cfg = newTestConfigWithSizers()
+	cfg = newTestConfig()
 	cfg.Sizer = request.SizerTypeBytes
 	require.NoError(t, xconfmap.Validate(cfg))
 
 	// Programmatic legacy usage -> error
-	cfg = newTestConfigWithSizers()
+	cfg = newTestConfig()
 	cfg.Batch.Get().Sizer = request.SizerTypeItems
 	require.EqualError(t, xconfmap.Validate(cfg), "batch: `batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead")
 }
@@ -160,14 +160,7 @@ func newTestBatchConfig() BatchConfig {
 	}
 }
 
-func newTestConfigWithSizers() Config {
-	return Config{
-		Sizer:        request.SizerTypeItems,
-		NumConsumers: 10,
-		QueueSize:    100_000,
-		Batch:        configoptional.Some(newTestBatchConfig()),
-	}
-}
+
 
 func TestUnmarshal(t *testing.T) {
 	newBaseCfg := func() configoptional.Optional[Config] {
