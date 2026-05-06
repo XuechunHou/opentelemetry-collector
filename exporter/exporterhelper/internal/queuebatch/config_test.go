@@ -46,32 +46,16 @@ func TestConfig_Validate(t *testing.T) {
 	cfg = newTestConfigWithSizers()
 	cfg.Batch.Get().Sizers = map[request.SizerType]SizerLimit{}
 	cfg.Batch.Get().Sizer = request.SizerType{}
-	require.EqualError(t, xconfmap.Validate(cfg), "batch: `batch` supports only `items` or `bytes` sizer, found \"\"")
+	require.NoError(t, xconfmap.Validate(cfg))
 
 	cfg = newTestConfigWithSizers()
 	cfg.Sizer = request.SizerTypeBytes
 	require.NoError(t, xconfmap.Validate(cfg))
 
-	// Scenario 1: batch::sizer matches queue sizer, min_size > queue_size -> error
+	// Programmatic legacy usage -> error
 	cfg = newTestConfigWithSizers()
-	cfg.Batch = configoptional.Some(BatchConfig{
-		FlushTimeout: 200 * time.Millisecond,
-		Sizer:        request.SizerTypeItems,
-		MinSize:      2048,
-	})
-	cfg.QueueSize = 2047
-	require.EqualError(t, xconfmap.Validate(cfg), "for sizer items, `min_size` (2048) must be less than or equal to `queue_size` (2047)")
-
-	// Scenario 3: batch::sizer does not match queue sizer, min_size > queue_size -> no error
-	cfg = newTestConfigWithSizers()
-	cfg.Sizer = request.SizerTypeBytes
-	cfg.Batch = configoptional.Some(BatchConfig{
-		FlushTimeout: 200 * time.Millisecond,
-		Sizer:        request.SizerTypeItems,
-		MinSize:      2048,
-	})
-	cfg.QueueSize = 2047
-	require.NoError(t, xconfmap.Validate(cfg))
+	cfg.Batch.Get().Sizer = request.SizerTypeItems
+	require.EqualError(t, xconfmap.Validate(cfg), "batch: `batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead")
 }
 
 func TestBatchConfig_Validate_MetadataKeys(t *testing.T) {
@@ -119,7 +103,7 @@ func TestBatchConfig_Validate(t *testing.T) {
 
 	cfg = newTestBatchConfig()
 	cfg.Sizer = request.SizerTypeItems
-	require.EqualError(t, xconfmap.Validate(cfg), "both `sizer` and `sizers` are specified, but only one is allowed, `sizers` is preferred")
+	require.EqualError(t, xconfmap.Validate(cfg), "`batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead")
 
 	cfg = newTestBatchConfig()
 	cfg.FlushTimeout = 0
@@ -143,41 +127,24 @@ func TestBatchConfig_Validate(t *testing.T) {
 	cfg.Sizers[request.SizerTypeItems] = SizerLimit{MinSize: 2048, MaxSize: 1024}
 	require.EqualError(t, xconfmap.Validate(cfg), "`max_size` (1024) must be greater or equal to `min_size` (2048) for sizer \"items\"")
 
-	// Test legacy fields when Sizers is empty
+	// Empty Sizers -> no error
 	cfg = BatchConfig{
 		FlushTimeout: 200 * time.Millisecond,
-		Sizer:        request.SizerTypeItems,
-		MinSize:      10,
 	}
 	require.NoError(t, xconfmap.Validate(cfg))
 
+	// Programmatic legacy usage -> error
 	cfg = BatchConfig{
 		FlushTimeout: 200 * time.Millisecond,
-		Sizer:        request.SizerTypeRequests,
+		MinSize:      10,
 	}
-	require.EqualError(t, xconfmap.Validate(cfg), "`batch` supports only `items` or `bytes` sizer, found \"requests\"")
+	require.EqualError(t, xconfmap.Validate(cfg), "`batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead")
 
 	cfg = BatchConfig{
 		FlushTimeout: 200 * time.Millisecond,
-		Sizer:        request.SizerTypeItems,
-		MinSize:      -1,
-	}
-	require.EqualError(t, xconfmap.Validate(cfg), "`min_size` must be non-negative, found -1")
-
-	cfg = BatchConfig{
-		FlushTimeout: 200 * time.Millisecond,
-		Sizer:        request.SizerTypeItems,
-		MaxSize:      -1,
-	}
-	require.EqualError(t, xconfmap.Validate(cfg), "`max_size` must be non-negative, found -1")
-
-	cfg = BatchConfig{
-		FlushTimeout: 200 * time.Millisecond,
-		Sizer:        request.SizerTypeItems,
-		MinSize:      20,
 		MaxSize:      10,
 	}
-	require.EqualError(t, xconfmap.Validate(cfg), "`max_size` (10) must be greater or equal to `min_size` (20)")
+	require.EqualError(t, xconfmap.Validate(cfg), "`batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead")
 }
 
 func newTestBatchConfig() BatchConfig {
@@ -249,34 +216,14 @@ func TestUnmarshal(t *testing.T) {
 			},
 		},
 		{
-			path:    "batch_set_nonempty_explicit_sizer.yaml",
-			baseCfg: newLegacyBaseCfg,
-			expectedCfg: func() configoptional.Optional[Config] {
-				cfg := newLegacyBaseCfg()
-				cfg.Get().Sizer = request.SizerTypeBytes
-				cfg.Get().QueueSize = 2000
-				cfg.Get().Batch = configoptional.Some(BatchConfig{
-					FlushTimeout: 200 * time.Millisecond,
-					Sizer:        request.SizerTypeBytes,
-					MinSize:      100,
-				})
-				return cfg
-			},
+			path:        "batch_set_nonempty_explicit_sizer.yaml",
+			baseCfg:     newLegacyBaseCfg,
+			expectedErr: "`batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead",
 		},
 		{
-			path:    "batch_set_nonempty_explicit_batch_sizer.yaml",
-			baseCfg: newLegacyBaseCfg,
-			expectedCfg: func() configoptional.Optional[Config] {
-				cfg := newLegacyBaseCfg()
-				cfg.Get().Sizer = request.SizerTypeBytes
-				cfg.Get().QueueSize = 2000
-				cfg.Get().Batch = configoptional.Some(BatchConfig{
-					FlushTimeout: 200 * time.Millisecond,
-					Sizer:        request.SizerTypeItems,
-					MinSize:      100,
-				})
-				return cfg
-			},
+			path:        "batch_set_nonempty_explicit_batch_sizer.yaml",
+			baseCfg:     newLegacyBaseCfg,
+			expectedErr: "`batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead",
 		},
 		{
 			path: "batch_set_nonempty_multiple_sizers.yaml",
@@ -295,19 +242,8 @@ func TestUnmarshal(t *testing.T) {
 			},
 		},
 		{
-			path: "batch_set_nonempty_no_explicit_sizer.yaml",
-			expectedCfg: func() configoptional.Optional[Config] {
-				cfg := newBaseCfg()
-				cfg.Get().QueueSize = 2000
-				cfg.Get().Batch = configoptional.Some(BatchConfig{
-					FlushTimeout: 200 * time.Millisecond,
-					MinSize:      100,
-					Sizers: map[request.SizerType]SizerLimit{
-						request.SizerTypeItems: {MinSize: 8192},
-					},
-				})
-				return cfg
-			},
+			path:        "batch_set_nonempty_no_explicit_sizer.yaml",
+			expectedErr: "`batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead",
 		},
 		{
 			path: "batch_unset.yaml",
@@ -316,7 +252,7 @@ func TestUnmarshal(t *testing.T) {
 		},
 		{
 			path:        "batch_invalid_mixed_style.yaml",
-			expectedErr: "cannot specify both `sizers` and legacy fields (`min_size`, `max_size`, `sizer`) in `batch`",
+			expectedErr: "`batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead",
 		},
 	}
 
@@ -340,3 +276,4 @@ func TestUnmarshal(t *testing.T) {
 		})
 	}
 }
+

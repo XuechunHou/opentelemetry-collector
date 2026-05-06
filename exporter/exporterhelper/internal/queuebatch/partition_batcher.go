@@ -33,7 +33,7 @@ type batch struct {
 type partitionBatcher struct {
 	cfg            BatchConfig
 	wp             *workerPool
-	sizer          request.Sizer
+	sizers         map[request.SizerType]request.Sizer
 	mergeCtx       func(context.Context, context.Context) context.Context
 	consumeFunc    sender.SendFunc[request.Request]
 	stopWG         sync.WaitGroup
@@ -49,17 +49,21 @@ type partitionBatcher struct {
 
 func newPartitionBatcher(
 	cfg BatchConfig,
-	sizer request.Sizer,
 	mergeCtx func(context.Context, context.Context) context.Context,
 	wp *workerPool,
 	next sender.SendFunc[request.Request],
 	logger *zap.Logger,
 	onEmpty func(),
 ) *partitionBatcher {
+
+	sizers := make(map[request.SizerType]request.Sizer)
+	for szt := range cfg.Sizers {
+		sizers[szt] = request.NewSizer(szt)
+	}
 	return &partitionBatcher{
 		cfg:          cfg,
 		wp:           wp,
-		sizer:        sizer,
+		sizers:       sizers,
 		mergeCtx:     mergeCtx,
 		consumeFunc:  next,
 		shutdownCh:   make(chan struct{}, 1),
@@ -68,6 +72,90 @@ func newPartitionBatcher(
 		lastDataTime: time.Now(),
 		active:       true,
 	}
+}
+
+func (qb *partitionBatcher) shouldKeep(req request.Request) bool {
+	if len(qb.cfg.Sizers) == 0 {
+		return false
+	}
+	for szt, limit := range qb.cfg.Sizers {
+		sz := qb.sizers[szt]
+		if sz.Sizeof(req) >= limit.MinSize {
+			return false
+		}
+	}
+	return true
+}
+
+func (qb *partitionBatcher) splitRequest(ctx context.Context, req request.Request) ([]request.Request, error) {
+	reqs := []request.Request{req}
+	var firstErr error
+	for szt, limit := range qb.cfg.Sizers {
+		if limit.MaxSize <= 0 {
+			continue
+		}
+		var newReqs []request.Request
+		for _, r := range reqs {
+			chunks, err := r.MergeSplit(ctx, int(limit.MaxSize), szt, nil)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+			}
+			newReqs = append(newReqs, chunks...)
+		}
+		reqs = newReqs
+	}
+	return reqs, firstErr
+}
+
+func (qb *partitionBatcher) mergeAndSplit(ctx context.Context, req1, req2 request.Request) ([]request.Request, error) {
+	var firstSzt request.SizerType
+	var firstLimit SizerLimit
+	found := false
+	for szt, limit := range qb.cfg.Sizers {
+		if limit.MaxSize > 0 {
+			firstSzt = szt
+			firstLimit = limit
+			found = true
+			break
+		}
+	}
+
+	var reqs []request.Request
+	var firstErr error
+	if found {
+		reqs, firstErr = req1.MergeSplit(ctx, int(firstLimit.MaxSize), firstSzt, req2)
+	} else {
+		szt := request.SizerTypeItems
+		for k := range qb.cfg.Sizers {
+			szt = k
+			break
+		}
+		reqs, firstErr = req1.MergeSplit(ctx, 0, szt, req2)
+	}
+
+	for szt, limit := range qb.cfg.Sizers {
+		if found && szt == firstSzt {
+			continue
+		}
+		if limit.MaxSize <= 0 {
+			continue
+		}
+		var newReqs []request.Request
+		for _, r := range reqs {
+			chunks, err := r.MergeSplit(ctx, int(limit.MaxSize), szt, nil)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+			}
+			newReqs = append(newReqs, chunks...)
+		}
+		reqs = newReqs
+	}
+
+	return reqs, firstErr
 }
 
 func (qb *partitionBatcher) resetTimer() {
@@ -81,7 +169,7 @@ func (qb *partitionBatcher) consumeInternal(ctx context.Context, req request.Req
 	isActive := qb.active
 	qb.lastDataTime = time.Now()
 	if qb.currentBatch == nil {
-		reqList, mergeSplitErr := req.MergeSplit(ctx, int(qb.cfg.MaxSize), qb.cfg.Sizer, nil)
+		reqList, mergeSplitErr := qb.splitRequest(ctx, req)
 		if mergeSplitErr != nil {
 			// Do not return in case of error if there are data, try to export as much as possible.
 			qb.logger.Warn("Failed to split request.", zap.Error(mergeSplitErr))
@@ -109,7 +197,7 @@ func (qb *partitionBatcher) consumeInternal(ctx context.Context, req request.Req
 		// We have at least one result in the reqList. Last in the list may not have enough data to be flushed.
 		// Find if it has at least MinSize, and if it does then move that as the current batch.
 		lastReq := reqList[len(reqList)-1]
-		if qb.sizer.Sizeof(lastReq) < qb.cfg.MinSize {
+		if qb.shouldKeep(lastReq) {
 			// Do not flush the last item and add it to the current batch.
 			reqList = reqList[:len(reqList)-1]
 			qb.currentBatch = &batch{
@@ -128,7 +216,7 @@ func (qb *partitionBatcher) consumeInternal(ctx context.Context, req request.Req
 		return isActive
 	}
 
-	reqList, mergeSplitErr := qb.currentBatch.req.MergeSplit(ctx, int(qb.cfg.MaxSize), qb.cfg.Sizer, req)
+	reqList, mergeSplitErr := qb.mergeAndSplit(ctx, qb.currentBatch.req, req)
 	// If failed to merge signal all Done callbacks from the current batch as well as the current request and reset the current batch.
 	if mergeSplitErr != nil {
 		// Do not return in case of error if there are data, try to export as much as possible.
@@ -173,7 +261,7 @@ func (qb *partitionBatcher) consumeInternal(ctx context.Context, req request.Req
 	// cannot unlock and re-lock because we are not done processing all the responses.
 	var firstBatch *batch
 	// Need to check the currentBatch if more than 1 result returned or if 1 result return but larger than MinSize.
-	if len(reqList) > 1 || qb.sizer.Sizeof(qb.currentBatch.req) >= qb.cfg.MinSize {
+	if len(reqList) > 1 || !qb.shouldKeep(qb.currentBatch.req) {
 		firstBatch = qb.currentBatch
 		qb.currentBatch = nil
 	}
@@ -183,7 +271,7 @@ func (qb *partitionBatcher) consumeInternal(ctx context.Context, req request.Req
 	// If we still have results to process, then we need to check if the last result has enough data to flush, or we add it to the currentBatch.
 	if len(reqList) > 0 {
 		lastReq := reqList[len(reqList)-1]
-		if qb.sizer.Sizeof(lastReq) < qb.cfg.MinSize {
+		if qb.shouldKeep(lastReq) {
 			// Do not flush the last item and add it to the current batch.
 			reqList = reqList[:len(reqList)-1]
 			qb.currentBatch = &batch{

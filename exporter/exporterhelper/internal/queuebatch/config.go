@@ -144,6 +144,12 @@ func (cfg *BatchConfig) Validate() error {
 		return fmt.Errorf("`flush_timeout` must be positive, found %d", cfg.FlushTimeout)
 	}
 
+	if cfg.Sizer.String() != "" || cfg.MinSize != 0 || cfg.MaxSize != 0 {
+		return errors.New("`batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead")
+	}
+
+
+
 	for szt, limit := range cfg.Sizers {
 		if szt != request.SizerTypeItems && szt != request.SizerTypeBytes {
 			return fmt.Errorf("`batch` supports only `items` or `bytes` sizer, found %q", szt.String())

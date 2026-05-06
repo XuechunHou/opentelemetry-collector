@@ -46,6 +46,7 @@ func NewQueueBatch(
 		next:        next,
 		maxWorkers:  cfg.NumConsumers,
 		logger:      set.Telemetry.Logger,
+		QueueSizer:  cfg.Sizer,
 	})
 	if err != nil {
 		return nil, err

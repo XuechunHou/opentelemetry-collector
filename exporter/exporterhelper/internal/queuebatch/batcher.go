@@ -28,23 +28,30 @@ type batcherSettings[T any] struct {
 	next        sender.SendFunc[T]
 	maxWorkers  int
 	logger      *zap.Logger
+	QueueSizer  request.SizerType
 }
 
 func NewBatcher(cfg configoptional.Optional[BatchConfig], set batcherSettings[request.Request]) (Batcher[request.Request], error) {
 	if !cfg.HasValue() {
 		return newDisabledBatcher(set.next), nil
 	}
+	bCfg := cfg.Get()
 
-	sizer := request.NewSizer(cfg.Get().Sizer)
-	if sizer == nil {
-		return nil, fmt.Errorf("queue_batch: unsupported sizer %q", cfg.Get().Sizer)
+	if len(bCfg.Sizers) == 0 {
+		sizerType := set.QueueSizer
+		if sizerType.String() == "" {
+			sizerType = request.SizerTypeItems
+		}
+		bCfg.Sizers = map[request.SizerType]SizerLimit{
+			sizerType: {},
+		}
 	}
 
 	if set.partitioner == nil {
-		return newPartitionBatcher(*cfg.Get(), sizer, set.mergeCtx, newWorkerPool(set.maxWorkers), set.next, set.logger, nil), nil
+		return newPartitionBatcher(*bCfg, set.mergeCtx, newWorkerPool(set.maxWorkers), set.next, set.logger, nil), nil
 	}
 
-	mb, err := newMultiBatcher(*cfg.Get(), sizer, newWorkerPool(set.maxWorkers), set.partitioner, set.mergeCtx, set.next, set.logger)
+	mb, err := newMultiBatcher(*bCfg, newWorkerPool(set.maxWorkers), set.partitioner, set.mergeCtx, set.next, set.logger)
 	if err != nil {
 		return nil, fmt.Errorf("error during creating multi batcher: %w", err)
 	}
