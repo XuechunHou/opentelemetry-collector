@@ -51,19 +51,9 @@ func (cfg *Config) Unmarshal(conf *confmap.Conf) error {
 		return err
 	}
 
-	if conf.IsSet("batch") && conf.IsSet("batch::sizers") {
-		if conf.IsSet("batch::min_size") || conf.IsSet("batch::max_size") || conf.IsSet("batch::sizer") {
-			return errors.New("cannot specify both `sizers` and legacy fields (`min_size`, `max_size`, `sizer`) in `batch`")
-		}
-	}
-
-	// If all of the following hold:
-	// 1. the sizer is set,
-	// 2. the batch sizer is not set and
-	// 3. the batch section is nonempty,
-	// then use the same value as the queue sizer.
-	if conf.IsSet("sizer") && !conf.IsSet("batch::sizer") && !conf.IsSet("batch::sizers") && conf.IsSet("batch") && conf.Get("batch") != nil {
-		cfg.Batch.Get().Sizer = cfg.Sizer
+	// Deprecated fields should not be set.
+	if conf.IsSet("batch::min_size") || conf.IsSet("batch::max_size") || conf.IsSet("batch::sizer") {
+		return errors.New("`batch` does not support `min_size`, `max_size`, `sizer` fields anymore, please use `sizers` instead")
 	}
 	return nil
 }
@@ -85,12 +75,6 @@ func (cfg *Config) Validate() error {
 
 	if cfg.Batch.HasValue() {
 		batchCfg := cfg.Batch.Get()
-		// Check legacy fields
-		if batchCfg.Sizer == cfg.Sizer {
-			if batchCfg.MinSize > cfg.QueueSize {
-				return fmt.Errorf("for sizer %s, `min_size` (%d) must be less than or equal to `queue_size` (%d)", cfg.Sizer.String(), batchCfg.MinSize, cfg.QueueSize)
-			}
-		}
 		// If Sizers map includes the same sizer type as the main sizer, check that the min size is not greater than queue size.
 		if limit, ok := batchCfg.Sizers[cfg.Sizer]; ok {
 			if limit.MinSize > cfg.QueueSize {
@@ -124,7 +108,7 @@ type BatchConfig struct {
 	// Deprecated: Use Sizers instead.
 	MaxSize int64 `mapstructure:"max_size"`
 
-	// Sizers allows configuring multiple sizing constraints.
+	// Sizers allows configuring one or more sizing constraints.
 	// The key is the SizerType (e.g., "bytes", "items").
 	Sizers map[request.SizerType]SizerLimit `mapstructure:"sizers"`
 
@@ -154,25 +138,6 @@ type PartitionConfig struct {
 func (cfg *BatchConfig) Validate() error {
 	if cfg == nil {
 		return nil
-	}
-
-	if cfg.Sizer.String() != "" && len(cfg.Sizers) > 0 {
-		return errors.New("both `sizer` and `sizers` are specified, but only one is allowed, `sizers` is preferred")
-	}
-
-	if len(cfg.Sizers) == 0 {
-		if cfg.Sizer != request.SizerTypeItems && cfg.Sizer != request.SizerTypeBytes {
-			return fmt.Errorf("`batch` supports only `items` or `bytes` sizer, found %q", cfg.Sizer.String())
-		}
-		if cfg.MinSize < 0 {
-			return fmt.Errorf("`min_size` must be non-negative, found %d", cfg.MinSize)
-		}
-		if cfg.MaxSize < 0 {
-			return fmt.Errorf("`max_size` must be non-negative, found %d", cfg.MaxSize)
-		}
-		if cfg.MaxSize > 0 && cfg.MaxSize < cfg.MinSize {
-			return fmt.Errorf("`max_size` (%d) must be greater or equal to `min_size` (%d)", cfg.MaxSize, cfg.MinSize)
-		}
 	}
 
 	if cfg.FlushTimeout <= 0 {
