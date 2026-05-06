@@ -46,7 +46,7 @@ func TestConfig_Validate(t *testing.T) {
 	cfg = newTestConfigWithSizers()
 	cfg.Batch.Get().Sizers = map[request.SizerType]SizerLimit{}
 	cfg.Batch.Get().Sizer = request.SizerType{}
-	require.NoError(t, xconfmap.Validate(cfg))
+	require.EqualError(t, xconfmap.Validate(cfg), "batch: `sizers` cannot be empty; leave it unset to use default batch settings, or configure at least one sizer limit")
 
 	cfg = newTestConfigWithSizers()
 	cfg.Sizer = request.SizerTypeBytes
@@ -131,11 +131,11 @@ func TestBatchConfig_Validate(t *testing.T) {
 	cfg.Sizers[request.SizerTypeBytes] = SizerLimit{MinSize: 100}
 	require.EqualError(t, xconfmap.Validate(cfg), "`sizers` supports only one entry at this moment")
 
-	// Empty Sizers -> no error
+	// Empty Sizers -> error
 	cfg = BatchConfig{
 		FlushTimeout: 200 * time.Millisecond,
 	}
-	require.NoError(t, xconfmap.Validate(cfg))
+	require.EqualError(t, xconfmap.Validate(cfg), "`sizers` cannot be empty; leave it unset to use default batch settings, or configure at least one sizer limit")
 
 	// Programmatic legacy usage -> error
 	cfg = BatchConfig{

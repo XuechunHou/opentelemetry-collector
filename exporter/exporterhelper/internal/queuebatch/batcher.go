@@ -28,7 +28,6 @@ type batcherSettings[T any] struct {
 	next        sender.SendFunc[T]
 	maxWorkers  int
 	logger      *zap.Logger
-	QueueSizer  request.SizerType
 }
 
 func NewBatcher(cfg configoptional.Optional[BatchConfig], set batcherSettings[request.Request]) (Batcher[request.Request], error) {
@@ -37,22 +36,12 @@ func NewBatcher(cfg configoptional.Optional[BatchConfig], set batcherSettings[re
 	}
 	bCfg := cfg.Get()
 
-	if len(bCfg.Sizers) > 0 {
-		// Normalize the first sizer to legacy fields (should only be one because of Validate)
-		for szt, limit := range bCfg.Sizers {
-			bCfg.Sizer = szt
-			bCfg.MinSize = limit.MinSize
-			bCfg.MaxSize = limit.MaxSize
-			break
-		}
-	} else {
-		// Fallback to queue sizer
-		sizerType := set.QueueSizer
-		if sizerType.String() == "" {
-			sizerType = request.SizerTypeItems
-		}
-		bCfg.Sizer = sizerType
-		// MinSize and MaxSize remain 0
+	// bCfg.Sizers is guaranteed to have exactly one entry due to Validate()
+	for szt, limit := range bCfg.Sizers {
+		bCfg.Sizer = szt
+		bCfg.MinSize = limit.MinSize
+		bCfg.MaxSize = limit.MaxSize
+		break
 	}
 
 	sizer := request.NewSizer(bCfg.Sizer)
