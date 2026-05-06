@@ -36,12 +36,19 @@ func NewBatcher(cfg configoptional.Optional[BatchConfig], set batcherSettings[re
 	}
 	bCfg := cfg.Get()
 
-	// bCfg.Sizers is guaranteed to have exactly one entry due to Validate()
-	for szt, limit := range bCfg.Sizers {
-		bCfg.Sizer = szt
-		bCfg.MinSize = limit.MinSize
-		bCfg.MaxSize = limit.MaxSize
-		break
+	if len(bCfg.Sizers) > 0 {
+		// Normalize the first sizer to legacy fields (should only be one because of Validate)
+		for szt, limit := range bCfg.Sizers {
+			bCfg.Sizer = szt
+			bCfg.MinSize = limit.MinSize
+			bCfg.MaxSize = limit.MaxSize
+			break
+		}
+	} else {
+		// Fallback to default limits (items: 8192, 0)
+		bCfg.Sizer = request.SizerTypeItems
+		bCfg.MinSize = 8192
+		bCfg.MaxSize = 0
 	}
 
 	sizer := request.NewSizer(bCfg.Sizer)

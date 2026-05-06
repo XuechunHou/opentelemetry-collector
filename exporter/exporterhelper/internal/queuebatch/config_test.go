@@ -46,7 +46,7 @@ func TestConfig_Validate(t *testing.T) {
 	cfg = newTestConfig()
 	cfg.Batch.Get().Sizers = map[request.SizerType]SizerLimit{}
 	cfg.Batch.Get().Sizer = request.SizerType{}
-	require.EqualError(t, xconfmap.Validate(cfg), "batch: `sizers` cannot be empty; leave it unset to use default batch settings, or configure at least one sizer limit")
+	require.NoError(t, xconfmap.Validate(cfg))
 
 	cfg = newTestConfig()
 	cfg.Sizer = request.SizerTypeBytes
@@ -131,11 +131,17 @@ func TestBatchConfig_Validate(t *testing.T) {
 	cfg.Sizers[request.SizerTypeBytes] = SizerLimit{MinSize: 100}
 	require.EqualError(t, xconfmap.Validate(cfg), "`sizers` supports only one entry at this moment")
 
-	// Empty Sizers -> error
+	// Empty Sizers -> no error (falls back to defaults)
 	cfg = BatchConfig{
 		FlushTimeout: 200 * time.Millisecond,
 	}
-	require.EqualError(t, xconfmap.Validate(cfg), "`sizers` cannot be empty; leave it unset to use default batch settings, or configure at least one sizer limit")
+	require.NoError(t, xconfmap.Validate(cfg))
+
+	cfg = BatchConfig{
+		FlushTimeout: 200 * time.Millisecond,
+		Sizers:       map[request.SizerType]SizerLimit{},
+	}
+	require.NoError(t, xconfmap.Validate(cfg))
 
 	// Programmatic legacy usage -> error
 	cfg = BatchConfig{
@@ -236,6 +242,21 @@ func TestUnmarshal(t *testing.T) {
 					FlushTimeout: 2 * time.Second,
 					Sizers: map[request.SizerType]SizerLimit{
 						request.SizerTypeItems: {MinSize: 1, MaxSize: 12},
+					},
+				})
+				return cfg
+			},
+		},
+		{
+			path: "batch_set_sizers_empty.yaml",
+			expectedCfg: func() configoptional.Optional[Config] {
+				cfg := newBaseCfg()
+				cfg.Get().Sizer = request.SizerTypeBytes
+				cfg.Get().QueueSize = 2000
+				cfg.Get().Batch = configoptional.Some(BatchConfig{
+					FlushTimeout: 2 * time.Second,
+					Sizers: map[request.SizerType]SizerLimit{
+						request.SizerTypeItems: {MinSize: 8192},
 					},
 				})
 				return cfg
